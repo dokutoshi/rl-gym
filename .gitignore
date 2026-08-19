@@ -1,0 +1,16 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.DS_Store
+.ipynb_checkpoints/
+
+# Secrets
+.env
+.env.*
+!.env.example
