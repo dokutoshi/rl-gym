@@ -1,0 +1,84 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Masked Q-learning • Taxi-v4</title><style>body{font:17px/1.6 system-ui;max-width:1100px;margin:auto;padding:28px;background:#101924;color:#ecf1f7}a{color:#8ed9ff}h1{line-height:1.15;font-size:2.3rem}nav, .tabs{display:flex;flex-wrap:wrap;gap:10px}button,input,textarea{font:inherit}button{padding:10px;background:#24405a;color:white;border:1px solid #7796ad;border-radius:6px;cursor:pointer}button[aria-selected=true]{background:#126557}section,.card{background:#192a3b;padding:22px;margin:20px 0;border-radius:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b111c;padding:18px}textarea{width:95%;min-height:110px}small{color:#b6c7d5}[hidden]{display:none}label{display:block}input[type=range]{width:240px}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #456} @media print{body{background:white;color:black}.tabs{display:none}section[hidden]{display:block}a{color:#125}}</style><body><p class="cwd-note"><b>Run commands from:</b> <code>~/developer/ml/rl_gym/course_12_session</code>. Use <code>python -m reference.train</code> for modules (dots, no .py). Relative result paths start in this folder.</p><nav><a href="02_mc.html">← Previous</a><a href="../index.html">Course index</a><a href="04_sarsa.html">Next →</a></nav><p>SESSION 03 / 12 · WEEK 5 · 90 MINUTES</p><h1>Masked Q-learning • Taxi-v4</h1><div class="tabs" role="tablist" aria-label="Module views"><button role="tab" id="tab-Theory" aria-controls="panel-Theory" aria-selected="true" onclick="show('Theory')">Theory</button><button role="tab" id="tab-Plain English" aria-controls="panel-Plain English" aria-selected="false" onclick="show('Plain English')">Plain English</button><button role="tab" id="tab-Code" aria-controls="panel-Code" aria-selected="false" onclick="show('Code')">Code</button><button role="tab" id="tab-Alternatives" aria-controls="panel-Alternatives" aria-selected="false" onclick="show('Alternatives')">Alternatives</button><button role="tab" id="tab-Systems" aria-controls="panel-Systems" aria-selected="false" onclick="show('Systems')">Systems</button><button role="tab" id="tab-Workshop" aria-controls="panel-Workshop" aria-selected="false" onclick="show('Workshop')">Workshop</button><button role="tab" id="tab-Quiz" aria-controls="panel-Quiz" aria-selected="false" onclick="show('Quiz')">Quiz</button></div><section role="tabpanel" aria-labelledby="tab-Theory" id="panel-Theory" ><p><b>Objective:</b> explain and implement Masked Q-learning • Taxi-v4.</p><pre>Q(s,a) ← Q(s,a)+α[r+γ max_valid Q(s′,·)−Q(s,a)]</pre><p>Reading: Sutton &amp; Barto, <i>Reinforcement Learning: An Introduction</i>, 2nd ed. (2018), §6.5; §§6.6–6.7. Section references are preferred to PDF page numbers. Modern methods use the primary papers linked below.</p><p>Learn what the best next action could achieve even while exploring. The mask excludes no-effect actions and illegal pickup/drop-off choices under the environment convention.</p><h3>Derivation checkpoint</h3><p>Write the data distribution, optimized quantity, estimator and update direction. Identify which quantities are held fixed during differentiation. Work a two-action numerical example before coding.</p><p><a href="../SOURCES.md">Reading links and attribution</a></p></section><section role="tabpanel" aria-labelledby="tab-Plain English" id="panel-Plain English" hidden><p>Learn what the best next action could achieve even while exploring. The mask excludes no-effect actions and illegal pickup/drop-off choices under the environment convention.</p><h3>Explain it to a partner</h3><p>Identify the agent, observations, actions, feedback and training data. What changes after a learning step? What evidence would convince you that it improved?</p><label>Discount γ: <input id="gamma" type="range" min="0" max="1" step=".01" value=".99"></label><p id="discount"></p><p>The calculator shows the value today of a reward of 10 received ten discount steps later. This illustrates discounting, not the full algorithm.</p></section><section role="tabpanel" aria-labelledby="tab-Code" id="panel-Code" hidden><h3>Start with the working examples</h3><p>These introductory workshops use the environment loop and lookup tables. No neural network is needed here. Function approximation is introduced in session 5; the first neural value network appears in session 6.</p><p><a href="../examples_original/taxi/action_masking_taxi.py">Your original Taxi masking example</a> anchors the lesson. Inspect its three masking locations. The compact tabular reference corrects the terminal update and preserves truncation bootstrapping; no neural model is involved. The original snapshot has top-level long experiments, so read it before running it.</p><p>Adapt your taxi/action_masking_taxi.py. Mask random actions, greedy actions, and next-state maxima. Always update the last transition; terminal target is the reward. Do not silently treat truncation as terminal.</p><pre>pixi run python -m reference.tabular --algo q --episodes 20 --out results/03_q</pre><p><a href="../starters/03_q.py">Runnable starter</a> · <a href="../reference/tabular.py">Full reference implementation</a> · <a href="../tests/test_course.py">Tests</a></p><details><summary>Embedded reference (available offline)</summary><pre>&quot;&quot;&quot;Sessions 2–4: tables, Monte Carlo and TD. No neural networks.&quot;&quot;&quot;
+import argparse, copy, json, random, time
+from pathlib import Path
+from collections import defaultdict, deque
+import numpy as np
+import gymnasium as gym
+
+
+def target(reward, terminated, next_value, gamma=.99):
+    return reward + gamma * (not terminated) * next_value
+
+
+def choose(q, mask, epsilon, rng):
+    valid = np.flatnonzero(mask)
+    if not len(valid):
+        raise ValueError(&#x27;No valid actions in nonterminal state&#x27;)
+    if rng.random() &lt; epsilon:
+        return int(rng.choice(valid))
+    best = valid[q[valid] == q[valid].max()]
+    return int(rng.choice(best))
+
+
+def tabular(args):
+    env = gym.make(args.env or {&#x27;loop&#x27;:&#x27;CartPole-v1&#x27;,&#x27;mc&#x27;:&#x27;Blackjack-v1&#x27;, &#x27;q&#x27;:&#x27;Taxi-v4&#x27;,&#x27;sarsa&#x27;:&#x27;CliffWalking-v1&#x27;,&#x27;evaluate&#x27;:&#x27;FrozenLake-v1&#x27;}[args.algo])
+    rng = np.random.default_rng(args.seed)
+    n = env.action_space.n
+    q = defaultdict(lambda: np.zeros(n)); counts = defaultdict(lambda: np.zeros(n))
+    if args.resume:
+        import ast
+        saved = json.loads(Path(args.resume).read_text())
+        for key, value in saved[&#x27;q&#x27;].items(): q[ast.literal_eval(key)] = np.array(value)
+        for key, value in saved[&#x27;counts&#x27;].items(): counts[ast.literal_eval(key)] = np.array(value)
+    scores=[]
+    for ep in range(args.episodes):
+        s, info = env.reset(seed=args.seed+ep)
+        key = lambda x: tuple(float(v) for v in x) if isinstance(x, (tuple, np.ndarray)) else int(x)
+        def act(state, inf):
+            mask = inf.get(&#x27;action_mask&#x27;, np.ones(n)) if not args.no_mask else np.ones(n)
+            return choose(q[key(state)], mask, 0 if args.algo==&#x27;evaluate&#x27; else args.epsilon, rng)
+        a = act(s,info) if args.algo!=&#x27;loop&#x27; else int(rng.integers(n))
+        trajectory=[]; total=0
+        for step in range(args.max_steps):
+            ns,r,term,trunc,ni = env.step(a); total+=r
+            trajectory.append((key(s),a,r))
+            na = act(ns,ni) if not term and args.algo!=&#x27;loop&#x27; else 0
+            if args.algo in (&#x27;q&#x27;,&#x27;sarsa&#x27;):
+                mask = ni.get(&#x27;action_mask&#x27;,np.ones(n)) if not args.no_mask else np.ones(n)
+                valid=np.flatnonzero(mask)
+                nv=0 if term else (q[key(ns)][na] if args.algo==&#x27;sarsa&#x27; else q[key(ns)][valid].max())
+                q[key(s)][a] += args.lr*(target(r,term,nv,args.gamma)-q[key(s)][a])
+            s,info,a=ns,ni,na if args.algo!=&#x27;loop&#x27; else int(rng.integers(n))
+            if term or trunc: break
+        if args.algo==&#x27;mc&#x27;:
+            # First-visit MC control; reverse returns, forward first-visit filter.
+            returns=[]; g=0
+            for _,_,r in reversed(trajectory): g=r+args.gamma*g; returns.append(g)
+            seen=set()
+            for (st,ac,_),g in zip(trajectory,reversed(returns)):
+                if (st,ac) in seen: continue
+                seen.add((st,ac)); counts[st][ac]+=1
+                q[st][ac]+=(g-q[st][ac])/counts[st][ac]
+        scores.append(total)
+    env.close()
+    Path(args.out).mkdir(parents=True,exist_ok=True)
+    Path(args.out,&#x27;table.json&#x27;).write_text(json.dumps({&#x27;q&#x27;:{repr(k):v.tolist() for k,v in q.items()},&#x27;counts&#x27;:{repr(k):v.tolist() for k,v in counts.items()}}))
+    return scores
+
+
+def main():
+    p=argparse.ArgumentParser()
+    p.add_argument(&#x27;--algo&#x27;,choices=[&#x27;mc&#x27;,&#x27;q&#x27;,&#x27;sarsa&#x27;,&#x27;evaluate&#x27;],required=True)
+    p.add_argument(&#x27;--env&#x27;);p.add_argument(&#x27;--episodes&#x27;,type=int,default=20)
+    p.add_argument(&#x27;--seed&#x27;,type=int,default=0);p.add_argument(&#x27;--epsilon&#x27;,type=float,default=.1)
+    p.add_argument(&#x27;--gamma&#x27;,type=float,default=.99);p.add_argument(&#x27;--lr&#x27;,type=float,default=.1)
+    p.add_argument(&#x27;--no-mask&#x27;,action=&#x27;store_true&#x27;);p.add_argument(&#x27;--max-steps&#x27;,type=int,default=500)
+    p.add_argument(&#x27;--resume&#x27;);p.add_argument(&#x27;--out&#x27;,default=&#x27;results/tabular&#x27;)
+    args=p.parse_args()
+    if args.episodes&lt;1:p.error(&#x27;episodes must be positive&#x27;)
+    scores=tabular(args)
+    Path(args.out,&#x27;metrics.json&#x27;).write_text(json.dumps({&#x27;config&#x27;:vars(args),&#x27;scores&#x27;:scores,&#x27;mean&#x27;:float(np.mean(scores))},indent=2))
+    print(f&#x27;Collected {len(scores)} episodes; mean return {np.mean(scores):.2f}&#x27;)
+
+if __name__==&#x27;__main__&#x27;:main()
+</pre></details><p>Browser code is readable and copyable; Python runs locally through Pixi, not inside this HTML.</p></section><section role="tabpanel" aria-labelledby="tab-Alternatives" id="panel-Alternatives" hidden><p>Precursor: TD(0). Alternatives: SARSA, Expected SARSA, double Q-learning. Optional environment transfer: run --env Blackjack-v1 and compare with MC.</p><h3>Decision exercise</h3><p>Compare data requirements, bias/variance, compute cost and deployment constraints. Name one situation where the alternative is preferable and one where it fails.</p></section><section role="tabpanel" aria-labelledby="tab-Systems" id="panel-Systems" hidden><pre>Mask belongs to the observation contract. Use the mask from the NEXT observation for the target. Audit action availability drift between training and deployment.</pre><h3>Experiment protocol</h3><p>Paired seeds 0–4, 5,000 episodes, masked versus unmasked, same budgets. Report both exploration returns and separate greedy evaluation. Count invalid actions; do not claim every mask guarantees safety outside this task.</p><p>Track environment steps or completion samples, wall time, configuration, seeds, package versions and checkpoint path. The smoke budget tests execution; the homework budget tests learning. No benchmark performance is promised.</p></section><section role="tabpanel" aria-labelledby="tab-Workshop" id="panel-Workshop" hidden><h3>0–30 min · Theory and intuition</h3><p>0–10: discuss prior exercise and prerequisites. 10–20: derive the displayed objective and work one numerical update. 20–30: explain the precursor and choose an alternative.</p><h3>30–60 min · Live implementation</h3><p>30–40: inspect starter and test. 40–55: implement the objective-specific exercise in EXERCISES.md and connect it to the reference. 55–60: run the smoke command and inspect the saved artifact.</p><h3>60–90 min · Experiments, research, systems</h3><p>60–70: run the small comparison. 70–80: draw the architecture and identify data boundaries. 80–90: explain results, limitations and the between-session protocol.</p><p><b>This session’s experiment:</b> Paired seeds 0–4, 5,000 episodes, masked versus unmasked, same budgets. Report both exploration returns and separate greedy evaluation. Count invalid actions; do not claim every mask guarantees safety outside this task.</p><h3>Checkpoint 03</h3><label><input type="checkbox" class="check"> I can explain the objective and alternative.</label><label><input type="checkbox" class="check"> My command and relevant tests pass.</label><label><input type="checkbox" class="check"> I saved a result and a failure hypothesis.</label><label>Notebook / facilitator notes<textarea id="notes" placeholder="Evidence, open questions, next experiment"></textarea></label><button id="export">Download notes</button><p>Progress and notes are stored in this browser when storage is available. Export notes for a durable checkpoint.</p><details><summary>Facilitator notes</summary><p>Prerequisites: Python functions, arrays, conditional probability; sessions 5–11 also require gradients and tensors. Pre-run the smoke command before class. Keep derivation to one update. If installation blocks a learner, pair them with a working machine and trace the embedded reference. Do not spend the workshop waiting for convergence. Exit ticket: answer the quiz and show the saved metrics. Assess conceptual correctness before return magnitude.</p></details></section><section role="tabpanel" aria-labelledby="tab-Quiz" id="panel-Quiz" hidden><p>If terminal reward is +20 and all Q values are zero, what target is used?</p><label>Your explanation<textarea id="attempt"></textarea></label><button id="reveal">Reveal and self-check</button><p id="answer" hidden>20. Skipping the terminal update prevents the pickup/drop-off reward from propagating correctly.</p><p>Self-assessment: name the assumption your answer depends on. Facilitator uses the explanation, not a guessed multiple-choice letter.</p></section><script>const key='rl-course-3'; function show(k){document.querySelectorAll('[role=tabpanel]').forEach(e=>e.hidden=e.id!=='panel-'+k);document.querySelectorAll('[role=tab]').forEach(e=>e.setAttribute('aria-selected',e.id==='tab-'+k));} function update(){document.getElementById('discount').textContent='Discounted reward: '+(10*Math.pow(Number(document.getElementById('gamma').value),10)).toFixed(3);}document.getElementById('gamma').oninput=update;update(); document.getElementById('reveal').onclick=()=>document.getElementById('answer').hidden=false;let saved={};try{saved=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){} const notes=document.getElementById('notes');notes.value=saved.notes||'';document.querySelectorAll('.check').forEach((e,i)=>{e.checked=(saved.checks||[])[i]||false;e.onchange=save});function save(){try{localStorage.setItem(key,JSON.stringify({notes:notes.value,checks:[...document.querySelectorAll('.check')].map(e=>e.checked)}))}catch(e){}}notes.oninput=save;document.getElementById('export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([notes.value],{type:'text/plain'}));a.download='session-03-notes.txt';a.click();URL.revokeObjectURL(a.href)};</script></body></html>

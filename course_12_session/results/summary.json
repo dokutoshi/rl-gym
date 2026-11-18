@@ -1,0 +1,11 @@
+[
+  {
+    "algo": "q",
+    "run_means": [
+      -200.0
+    ],
+    "mean": -200.0,
+    "sd_across_training_seeds": null,
+    "note": "Training scores, not held-out evaluation. Language scores differ in meaning by objective."
+  }
+]

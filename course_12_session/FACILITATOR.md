@@ -1,0 +1,11 @@
+# Facilitator guide
+
+Weeks 0–1: setup clinic and Python/probability diagnostic. Meet in weeks 1, 3, 5, …, 23, then review capstones in week 24. Allow 2–4 hours weekly independent work; optional GPU extensions may need much more. All core meetings reserve 30 minutes each for foundations, coding, and experiments/architecture. Session 1 focuses on the random-policy algorithm and environment contract; session 12 focuses on Monte Carlo policy evaluation and the harness.
+
+Before each meeting, run its command and relevant tests; pre-stage a checkpoint for demonstration. In the first block, derive one update and discuss its precursor. In the second, learners work in pairs from the scaffold and compare the reference only after explaining a numerical example. In the third, use small runs to test a hypothesis and assign the multi-seed study. Do not interpret an unfinished DQN/PPO run as algorithm failure. Use the Quiz answer as an exit ticket. Session-specific guidance lives in each module's Workshop view.
+
+The five subject views are reading perspectives, not five competing time blocks. Theory is roughly 20% technical derivation plus 13% intuition/history; code 33%; experiments/research/systems 34%. Adjust within each 30-minute block, keeping the 90-minute limit.
+
+Optional 8A (actor-critic, strongly recommended for newcomers): 0–30 derive advantage and baseline; 30–60 inspect --algo ac and add one-step TD advantages; 60–90 compare critic residuals and return variance to REINFORCE. Optional 8B: GAE/vectorized PPO. Optional 9A: transformer next-token training and prompt masks; run outside the core CPU budget. Optional environment transfers: Box2D after basic DQN/PPO, MuJoCo after continuous-action distributions, ALE after image encoders and replay memory planning. These require separate dependency and compute budgets.
+
+Capstone rubric: implementation correctness 30%, reproducible protocol 25%, honest analysis 25%, architecture and limitations 20%. Require five training seeds for comparisons and separate evaluation seeds, with uncertainty appropriate to the sampling unit. A transparent negative result can receive full credit. In paired comparisons, aggregate differences per training seed; never treat correlated timesteps as independent replicates.

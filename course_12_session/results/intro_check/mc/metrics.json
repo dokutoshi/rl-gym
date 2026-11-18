@@ -1,0 +1,20 @@
+{
+  "config": {
+    "algo": "mc",
+    "env": null,
+    "episodes": 2,
+    "seed": 0,
+    "epsilon": 0.1,
+    "gamma": 0.99,
+    "lr": 0.1,
+    "no_mask": false,
+    "max_steps": 500,
+    "resume": null,
+    "out": "results/intro_check/mc"
+  },
+  "scores": [
+    -1.0,
+    1.0
+  ],
+  "mean": 0.0
+}

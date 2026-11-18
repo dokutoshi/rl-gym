@@ -1,0 +1,22 @@
+[workspace]
+name = "rl-dpo-course"
+version = "1.0.0"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.12.*"
+pip = "*"
+
+[pypi-dependencies]
+numpy = "==2.5.4"
+gymnasium = { version = "==1.3.0", extras = ["classic-control"] }
+torch = "==2.14.1"
+
+[tasks]
+test = "python -m unittest discover -s tests -v"
+smoke = "python -m reference.harness --smoke"
+serve = "python -m http.server 8000"
+
+[system-requirements]
+macos = "14.0"

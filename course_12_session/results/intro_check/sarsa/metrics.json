@@ -1,0 +1,20 @@
+{
+  "config": {
+    "algo": "sarsa",
+    "env": null,
+    "episodes": 2,
+    "seed": 0,
+    "epsilon": 0.1,
+    "gamma": 0.99,
+    "lr": 0.1,
+    "no_mask": false,
+    "max_steps": 500,
+    "resume": null,
+    "out": "results/intro_check/sarsa"
+  },
+  "scores": [
+    -1274,
+    -1094
+  ],
+  "mean": -1184.0
+}

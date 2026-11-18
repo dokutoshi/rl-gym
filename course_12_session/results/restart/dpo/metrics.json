@@ -1,0 +1,28 @@
+{
+  "config": {
+    "algo": "dpo",
+    "env": null,
+    "episodes": 1,
+    "seed": 10000,
+    "lr": 0.01,
+    "gamma": 0.99,
+    "epsilon": 0.1,
+    "beta": 0.1,
+    "no_mask": false,
+    "max_steps": 500,
+    "out": "results/restart/dpo",
+    "resume": "/Users/leonardpimentel/Documents/Codex/2026-10-27/referenced-chatgpt-conversation-this-is-an/work/rl_curriculum/results/smoke/dpo/0/checkpoint.pt",
+    "save_every": 10
+  },
+  "scores": [
+    -0.6911492347717285
+  ],
+  "mean": -0.6911492347717285,
+  "seconds": 1.08613920211792,
+  "python": "3.12.14",
+  "versions": {
+    "numpy": "2.5.4",
+    "gymnasium": "1.3.0",
+    "torch": "2.14.1"
+  }
+}

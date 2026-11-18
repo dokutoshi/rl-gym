@@ -1,0 +1,22 @@
+{
+  "config": {
+    "episodes": 2,
+    "seed": 42,
+    "render_mode": null,
+    "out": "results/intro_check/loop"
+  },
+  "scores": [
+    30.0,
+    46.0
+  ],
+  "endings": [
+    {
+      "terminated": true,
+      "truncated": false
+    },
+    {
+      "terminated": true,
+      "truncated": false
+    }
+  ]
+}

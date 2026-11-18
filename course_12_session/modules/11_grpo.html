@@ -1,0 +1,187 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Group Relative Policy Optimization</title><style>body{font:17px/1.6 system-ui;max-width:1100px;margin:auto;padding:28px;background:#101924;color:#ecf1f7}a{color:#8ed9ff}h1{line-height:1.15;font-size:2.3rem}nav, .tabs{display:flex;flex-wrap:wrap;gap:10px}button,input,textarea{font:inherit}button{padding:10px;background:#24405a;color:white;border:1px solid #7796ad;border-radius:6px;cursor:pointer}button[aria-selected=true]{background:#126557}section,.card{background:#192a3b;padding:22px;margin:20px 0;border-radius:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b111c;padding:18px}textarea{width:95%;min-height:110px}small{color:#b6c7d5}[hidden]{display:none}label{display:block}input[type=range]{width:240px}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:10px;border-bottom:1px solid #456} @media print{body{background:white;color:black}.tabs{display:none}section[hidden]{display:block}a{color:#125}}</style><body><p class="cwd-note"><b>Run commands from:</b> <code>~/developer/ml/rl_gym/course_12_session</code>. Use <code>python -m reference.train</code> for modules (dots, no .py). Relative result paths start in this folder.</p><nav><a href="10_dpo.html">← Previous</a><a href="../index.html">Course index</a><a href="12_evaluate.html">Next →</a></nav><p>SESSION 11 / 12 · WEEK 21 · 90 MINUTES</p><h1>Group Relative Policy Optimization</h1><div class="tabs" role="tablist" aria-label="Module views"><button role="tab" id="tab-Theory" aria-controls="panel-Theory" aria-selected="true" onclick="show('Theory')">Theory</button><button role="tab" id="tab-Plain English" aria-controls="panel-Plain English" aria-selected="false" onclick="show('Plain English')">Plain English</button><button role="tab" id="tab-Code" aria-controls="panel-Code" aria-selected="false" onclick="show('Code')">Code</button><button role="tab" id="tab-Alternatives" aria-controls="panel-Alternatives" aria-selected="false" onclick="show('Alternatives')">Alternatives</button><button role="tab" id="tab-Systems" aria-controls="panel-Systems" aria-selected="false" onclick="show('Systems')">Systems</button><button role="tab" id="tab-Workshop" aria-controls="panel-Workshop" aria-selected="false" onclick="show('Workshop')">Workshop</button><button role="tab" id="tab-Quiz" aria-controls="panel-Quiz" aria-selected="false" onclick="show('Quiz')">Quiz</button></div><section role="tabpanel" aria-labelledby="tab-Theory" id="panel-Theory" ><p><b>Objective:</b> explain and implement Group Relative Policy Optimization.</p><pre>A_i = (r_i−mean_group r)/(std_group r+ε)</pre><p>Reading: Sutton &amp; Barto, <i>Reinforcement Learning: An Introduction</i>, 2nd ed. (2018), §13.4 conceptual baseline bridge; DeepSeekMath §4. Section references are preferred to PDF page numbers. Modern methods use the primary papers linked below.</p><p>Sample several answers for the same prompt and compare each reward with its group. A learned critic is replaced by group-relative advantages; the reward signal can still be wrong.</p><h3>Derivation checkpoint</h3><p>Write the data distribution, optimized quantity, estimator and update direction. Identify which quantities are held fixed during differentiation. Work a two-action numerical example before coding.</p><p><a href="../SOURCES.md">Reading links and attribution</a></p></section><section role="tabpanel" aria-labelledby="tab-Plain English" id="panel-Plain English" hidden><p>Sample several answers for the same prompt and compare each reward with its group. A learned critic is replaced by group-relative advantages; the reward signal can still be wrong.</p><h3>Explain it to a partner</h3><p>Identify the agent, observations, actions, feedback and training data. What changes after a learning step? What evidence would convince you that it improved?</p><label>Discount γ: <input id="gamma" type="range" min="0" max="1" step=".01" value=".99"></label><p id="discount"></p><p>The calculator shows the value today of a reward of 10 received ten discount steps later. This illustrates discounting, not the full algorithm.</p></section><section role="tabpanel" aria-labelledby="tab-Code" id="panel-Code" hidden><p>Generate eight one-token completions per prompt. Detach group advantages and old log probabilities. Inspect the clipped surrogate and positive sampled KL estimator relative to the fixed reference.</p><pre>pixi run python -m reference.train --algo grpo --episodes 20 --out results/11_grpo</pre><p><a href="../starters/11_grpo.py">Runnable starter</a> · <a href="../reference/train.py">Full reference implementation</a> · <a href="../tests/test_course.py">Tests</a></p><details><summary>Embedded reference (available offline)</summary><pre>&quot;&quot;&quot;CPU teaching implementations. Run --help. No downloads or pretrained models.&quot;&quot;&quot;
+import argparse, copy, json, random, time
+from pathlib import Path
+from collections import defaultdict, deque
+import numpy as np
+import gymnasium as gym
+
+
+def target(reward, terminated, next_value, gamma=.99):
+    return reward + gamma * (not terminated) * next_value
+
+
+def choose(q, mask, epsilon, rng):
+    valid = np.flatnonzero(mask)
+    if not len(valid):
+        raise ValueError(&#x27;No valid actions in nonterminal state&#x27;)
+    if rng.random() &lt; epsilon:
+        return int(rng.choice(valid))
+    best = valid[q[valid] == q[valid].max()]
+    return int(rng.choice(best))
+
+
+def tabular(args):
+    env = gym.make(args.env or {&#x27;loop&#x27;:&#x27;CartPole-v1&#x27;,&#x27;mc&#x27;:&#x27;Blackjack-v1&#x27;, &#x27;q&#x27;:&#x27;Taxi-v4&#x27;,&#x27;sarsa&#x27;:&#x27;CliffWalking-v1&#x27;,&#x27;evaluate&#x27;:&#x27;FrozenLake-v1&#x27;}[args.algo])
+    rng = np.random.default_rng(args.seed)
+    n = env.action_space.n
+    q = defaultdict(lambda: np.zeros(n)); counts = defaultdict(lambda: np.zeros(n))
+    if args.resume:
+        import ast
+        saved = json.loads(Path(args.resume).read_text())
+        for key, value in saved[&#x27;q&#x27;].items(): q[ast.literal_eval(key)] = np.array(value)
+        for key, value in saved[&#x27;counts&#x27;].items(): counts[ast.literal_eval(key)] = np.array(value)
+    scores=[]
+    for ep in range(args.episodes):
+        s, info = env.reset(seed=args.seed+ep)
+        key = lambda x: tuple(float(v) for v in x) if isinstance(x, (tuple, np.ndarray)) else int(x)
+        def act(state, inf):
+            mask = inf.get(&#x27;action_mask&#x27;, np.ones(n)) if not args.no_mask else np.ones(n)
+            return choose(q[key(state)], mask, 0 if args.algo==&#x27;evaluate&#x27; else args.epsilon, rng)
+        a = act(s,info) if args.algo!=&#x27;loop&#x27; else int(rng.integers(n))
+        trajectory=[]; total=0
+        for step in range(args.max_steps):
+            ns,r,term,trunc,ni = env.step(a); total+=r
+            trajectory.append((key(s),a,r))
+            na = act(ns,ni) if not term and args.algo!=&#x27;loop&#x27; else 0
+            if args.algo in (&#x27;q&#x27;,&#x27;sarsa&#x27;):
+                mask = ni.get(&#x27;action_mask&#x27;,np.ones(n)) if not args.no_mask else np.ones(n)
+                valid=np.flatnonzero(mask)
+                nv=0 if term else (q[key(ns)][na] if args.algo==&#x27;sarsa&#x27; else q[key(ns)][valid].max())
+                q[key(s)][a] += args.lr*(target(r,term,nv,args.gamma)-q[key(s)][a])
+            s,info,a=ns,ni,na if args.algo!=&#x27;loop&#x27; else int(rng.integers(n))
+            if term or trunc: break
+        if args.algo==&#x27;mc&#x27;:
+            # First-visit MC control; reverse returns, forward first-visit filter.
+            returns=[]; g=0
+            for _,_,r in reversed(trajectory): g=r+args.gamma*g; returns.append(g)
+            seen=set()
+            for (st,ac,_),g in zip(trajectory,reversed(returns)):
+                if (st,ac) in seen: continue
+                seen.add((st,ac)); counts[st][ac]+=1
+                q[st][ac]+=(g-q[st][ac])/counts[st][ac]
+        scores.append(total)
+    env.close()
+    Path(args.out).mkdir(parents=True,exist_ok=True)
+    Path(args.out,&#x27;table.json&#x27;).write_text(json.dumps({&#x27;q&#x27;:{repr(k):v.tolist() for k,v in q.items()},&#x27;counts&#x27;:{repr(k):v.tolist() for k,v in counts.items()}}))
+    return scores
+
+
+def neural(args):
+    import torch
+    from torch import nn
+    from torch.distributions import Categorical
+    torch.manual_seed(args.seed); torch.set_num_threads(1)
+    rng=np.random.default_rng(args.seed); random.seed(args.seed)
+    env=gym.make(args.env or &#x27;CartPole-v1&#x27;)
+    dim=env.observation_space.shape[0]; n=env.action_space.n
+    linear=args.algo==&#x27;linear&#x27;
+    model=nn.Linear(dim,n) if linear else nn.Sequential(nn.Linear(dim,64),nn.Tanh(),nn.Linear(64,n))
+    critic=nn.Sequential(nn.Linear(dim,64),nn.Tanh(),nn.Linear(64,1))
+    optimizer=torch.optim.Adam(list(model.parameters())+list(critic.parameters()),lr=args.lr)
+    if args.resume:
+        ck=torch.load(args.resume,weights_only=False); model.load_state_dict(ck[&#x27;model&#x27;]); critic.load_state_dict(ck[&#x27;critic&#x27;]); optimizer.load_state_dict(ck[&#x27;optimizer&#x27;])
+    frozen=copy.deepcopy(model); replay=deque(maxlen=10000); scores=[]; updates=0
+    tensor=lambda x: torch.as_tensor(np.asarray(x),dtype=torch.float32)
+    for ep in range(args.episodes):
+        s,_=env.reset(seed=args.seed+ep); rollout=[]; total=0
+        for step in range(args.max_steps):
+            x=tensor(s); logits=model(x)
+            if args.algo in (&#x27;linear&#x27;,&#x27;dqn&#x27;):
+                a=int(rng.integers(n)) if rng.random()&lt;args.epsilon else int(logits.argmax())
+            else: a=int(Categorical(logits=logits).sample())
+            ns,r,term,trunc,_=env.step(a); total+=r
+            rollout.append((s,a,r,ns,term,trunc))
+            if args.algo in (&#x27;linear&#x27;,&#x27;dqn&#x27;):
+                replay.append((s,a,r,ns,term))
+                batch=random.sample(list(replay),min(32,len(replay))) if not linear else [replay[-1]]
+                bs,ba,br,bn,bt=zip(*batch)
+                pred=model(tensor(bs)).gather(1,torch.tensor(ba)[:,None]).squeeze(1)
+                with torch.no_grad():
+                    nxt=(model if linear else frozen)(tensor(bn)).max(1).values
+                    y=tensor(br)+args.gamma*(1-tensor(bt))*nxt
+                loss=nn.functional.smooth_l1_loss(pred,y)
+                optimizer.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(),1); optimizer.step()
+                updates+=1
+                if updates%100==0: frozen.load_state_dict(model.state_dict())
+            s=ns
+            if term or trunc: break
+        if args.algo not in (&#x27;linear&#x27;,&#x27;dqn&#x27;):
+            states=tensor([t[0] for t in rollout]); actions=torch.tensor([t[1] for t in rollout])
+            with torch.no_grad():
+                # Bootstrap truncations; never bootstrap true terminations.
+                g=0. if (rollout[-1][4] or args.algo==&#x27;reinforce&#x27;) else float(critic(tensor(rollout[-1][3])).item())
+                ret=[]
+                for t in reversed(rollout): g=t[2]+args.gamma*g; ret.append(g)
+                returns=tensor(ret[::-1]); values=critic(states).squeeze(1)
+                adv=returns-values if args.algo in (&#x27;ppo&#x27;,&#x27;ac&#x27;) else returns
+                old=Categorical(logits=model(states)).log_prob(actions)
+            for _ in range(4 if args.algo==&#x27;ppo&#x27; else 1):
+                dist=Categorical(logits=model(states)); lp=dist.log_prob(actions)
+                if args.algo==&#x27;ppo&#x27;:
+                    ratio=(lp-old).exp(); policy=-torch.minimum(ratio*adv,ratio.clamp(.8,1.2)*adv).mean()
+                else: policy=-(lp*adv).mean()
+                value_loss=(critic(states).squeeze(1)-returns).square().mean() if args.algo in (&#x27;ppo&#x27;,&#x27;ac&#x27;) else tensor(0.)
+                loss=policy+.5*value_loss-.01*dist.entropy().mean()
+                optimizer.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(list(model.parameters())+list(critic.parameters()),.5); optimizer.step()
+        scores.append(total)
+        if (ep+1)%args.save_every==0 or ep==args.episodes-1:
+            Path(args.out).mkdir(parents=True,exist_ok=True)
+            torch.save({&#x27;model&#x27;:model.state_dict(),&#x27;critic&#x27;:critic.state_dict(),&#x27;optimizer&#x27;:optimizer.state_dict(),&#x27;episode&#x27;:ep+1,&#x27;config&#x27;:vars(args)},Path(args.out,&#x27;checkpoint.pt&#x27;))
+    env.close(); return scores
+
+
+def language(args):
+    &quot;&quot;&quot;One-token conditional language model: exact objectives, tiny vocabulary.
+    Not a transformer or a benchmark of general language ability.
+    &quot;&quot;&quot;
+    import torch
+    torch.manual_seed(args.seed); torch.set_num_threads(1)
+    # Four prompt IDs, three completion tokens. Correct token is prompt % 3.
+    logits=torch.nn.Parameter(torch.zeros(4,3)); optimizer=torch.optim.Adam([logits],lr=args.lr)
+    if args.resume:
+        ck=torch.load(args.resume,weights_only=False); logits.data.copy_(ck[&#x27;logits&#x27;]); optimizer.load_state_dict(ck[&#x27;optimizer&#x27;])
+    ref=ck[&#x27;reference_logprobs&#x27;].clone() if args.resume else logits.detach().clone().log_softmax(-1); history=[]
+    for step in range(args.episodes):
+        lp=logits.log_softmax(-1); ids=torch.arange(4); chosen=ids%3; rejected=(chosen+1)%3
+        if args.algo==&#x27;sft&#x27;: loss=-lp[ids,chosen].mean()
+        elif args.algo==&#x27;dpo&#x27;:
+            margin=(lp[ids,chosen]-lp[ids,rejected])-(ref[ids,chosen]-ref[ids,rejected])
+            loss=-torch.nn.functional.logsigmoid(args.beta*margin).mean()
+        else:
+            with torch.no_grad():
+                old=logits.detach().log_softmax(-1)
+                actions=torch.distributions.Categorical(logits=logits).sample((8,)).T
+                rewards=(actions==chosen[:,None]).float()
+                adv=(rewards-rewards.mean(1,keepdim=True))/(rewards.std(1,keepdim=True,unbiased=False)+1e-8)
+                old_a=old.gather(1,actions); ref_a=ref.gather(1,actions)
+            # Group-relative clipped surrogate, sampled positive KL estimator.
+            for _ in range(4):
+                new=logits.log_softmax(-1).gather(1,actions); ratio=(new-old_a).exp()
+                kl=(ref_a-new).exp()-(ref_a-new)-1
+                loss=-(torch.minimum(ratio*adv,ratio.clamp(.8,1.2)*adv)-args.beta*kl).mean()
+                optimizer.zero_grad(); loss.backward(); optimizer.step()
+            history.append(float(rewards.mean())); continue
+        optimizer.zero_grad(); loss.backward(); optimizer.step(); history.append(float(-loss.detach()))
+    Path(args.out).mkdir(parents=True,exist_ok=True)
+    torch.save({&#x27;logits&#x27;:logits.detach(),&#x27;optimizer&#x27;:optimizer.state_dict(),&#x27;reference_logprobs&#x27;:ref,&#x27;config&#x27;:vars(args)},Path(args.out,&#x27;checkpoint.pt&#x27;))
+    return history
+
+
+def main():
+    p=argparse.ArgumentParser()
+    p.add_argument(&#x27;--algo&#x27;,choices=[&#x27;loop&#x27;,&#x27;mc&#x27;,&#x27;q&#x27;,&#x27;sarsa&#x27;,&#x27;evaluate&#x27;,&#x27;linear&#x27;,&#x27;dqn&#x27;,&#x27;reinforce&#x27;,&#x27;ac&#x27;,&#x27;ppo&#x27;,&#x27;sft&#x27;,&#x27;dpo&#x27;,&#x27;grpo&#x27;],required=True)
+    p.add_argument(&#x27;--env&#x27;); p.add_argument(&#x27;--episodes&#x27;,type=int,default=20); p.add_argument(&#x27;--seed&#x27;,type=int,default=0)
+    p.add_argument(&#x27;--lr&#x27;,type=float,default=.01); p.add_argument(&#x27;--gamma&#x27;,type=float,default=.99); p.add_argument(&#x27;--epsilon&#x27;,type=float,default=.1)
+    p.add_argument(&#x27;--beta&#x27;,type=float,default=.1); p.add_argument(&#x27;--no-mask&#x27;,action=&#x27;store_true&#x27;); p.add_argument(&#x27;--max-steps&#x27;,type=int,default=500)
+    p.add_argument(&#x27;--out&#x27;,default=&#x27;results/run&#x27;); p.add_argument(&#x27;--resume&#x27;); p.add_argument(&#x27;--save-every&#x27;,type=int,default=10)
+    args=p.parse_args(); start=time.time()
+    if args.episodes&lt;1: p.error(&#x27;episodes must be positive&#x27;)
+    if args.algo in (&#x27;loop&#x27;,&#x27;mc&#x27;,&#x27;q&#x27;,&#x27;sarsa&#x27;,&#x27;evaluate&#x27;): scores=tabular(args)
+    elif args.algo in (&#x27;sft&#x27;,&#x27;dpo&#x27;,&#x27;grpo&#x27;): scores=language(args)
+    else: scores=neural(args)
+    import platform, importlib.metadata
+    result={&#x27;config&#x27;:vars(args),&#x27;scores&#x27;:scores,&#x27;mean&#x27;:float(np.mean(scores)),&#x27;seconds&#x27;:time.time()-start,&#x27;python&#x27;:platform.python_version(),&#x27;versions&#x27;:{k:importlib.metadata.version(k) for k in [&#x27;numpy&#x27;,&#x27;gymnasium&#x27;,&#x27;torch&#x27;]}}
+    Path(args.out).mkdir(parents=True,exist_ok=True); Path(args.out,&#x27;metrics.json&#x27;).write_text(json.dumps(result,indent=2)); print(json.dumps({k:v for k,v in result.items() if k!=&#x27;scores&#x27;}))
+
+if __name__==&#x27;__main__&#x27;: main()
+</pre></details><p>Browser code is readable and copyable; Python runs locally through Pixi, not inside this HTML.</p></section><section role="tabpanel" aria-labelledby="tab-Alternatives" id="panel-Alternatives" hidden><p>Precursor: REINFORCE with baselines and PPO. Alternatives: PPO with critic, leave-one-out baselines and later GRPO variants. The included one-token formulation is not a reproduction of DeepSeekMath training.</p><h3>Decision exercise</h3><p>Compare data requirements, bias/variance, compute cost and deployment constraints. Name one situation where the alternative is preferable and one where it fails.</p></section><section role="tabpanel" aria-labelledby="tab-Systems" id="panel-Systems" hidden><pre>Prompt sampler → grouped policy rollouts → deterministic verifier → group normalization → old-policy ratios/reference KL → optimizer. Fresh samples make the loop online.</pre><h3>Experiment protocol</h3><p>Vary group size 2/8/16 as an exercise; measure zero-variance groups, reward and exact categorical KL. Compare rollout cost. Uniformly correct or incorrect groups have zero relative advantage.</p><p>Track environment steps or completion samples, wall time, configuration, seeds, package versions and checkpoint path. The smoke budget tests execution; the homework budget tests learning. No benchmark performance is promised.</p></section><section role="tabpanel" aria-labelledby="tab-Workshop" id="panel-Workshop" hidden><h3>0–30 min · Theory and intuition</h3><p>0–10: discuss prior exercise and prerequisites. 10–20: derive the displayed objective and work one numerical update. 20–30: explain the precursor and choose an alternative.</p><h3>30–60 min · Live implementation</h3><p>30–40: inspect starter and test. 40–55: implement the objective-specific exercise in EXERCISES.md and connect it to the reference. 55–60: run the smoke command and inspect the saved artifact.</p><h3>60–90 min · Experiments, research, systems</h3><p>60–70: run the small comparison. 70–80: draw the architecture and identify data boundaries. 80–90: explain results, limitations and the between-session protocol.</p><p><b>This session’s experiment:</b> Vary group size 2/8/16 as an exercise; measure zero-variance groups, reward and exact categorical KL. Compare rollout cost. Uniformly correct or incorrect groups have zero relative advantage.</p><h3>Checkpoint 11</h3><label><input type="checkbox" class="check"> I can explain the objective and alternative.</label><label><input type="checkbox" class="check"> My command and relevant tests pass.</label><label><input type="checkbox" class="check"> I saved a result and a failure hypothesis.</label><label>Notebook / facilitator notes<textarea id="notes" placeholder="Evidence, open questions, next experiment"></textarea></label><button id="export">Download notes</button><p>Progress and notes are stored in this browser when storage is available. Export notes for a durable checkpoint.</p><details><summary>Facilitator notes</summary><p>Prerequisites: Python functions, arrays, conditional probability; sessions 5–11 also require gradients and tensors. Pre-run the smoke command before class. Keep derivation to one update. If installation blocks a learner, pair them with a working machine and trace the embedded reference. Do not spend the workshop waiting for convergence. Exit ticket: answer the quiz and show the saved metrics. Assess conceptual correctness before return magnitude.</p></details></section><section role="tabpanel" aria-labelledby="tab-Quiz" id="panel-Quiz" hidden><p>What signal comes from a group with identical rewards?</p><label>Your explanation<textarea id="attempt"></textarea></label><button id="reveal">Reveal and self-check</button><p id="answer" hidden>The normalized reward advantages are zero; the KL term may still update the policy.</p><p>Self-assessment: name the assumption your answer depends on. Facilitator uses the explanation, not a guessed multiple-choice letter.</p></section><script>const key='rl-course-11'; function show(k){document.querySelectorAll('[role=tabpanel]').forEach(e=>e.hidden=e.id!=='panel-'+k);document.querySelectorAll('[role=tab]').forEach(e=>e.setAttribute('aria-selected',e.id==='tab-'+k));} function update(){document.getElementById('discount').textContent='Discounted reward: '+(10*Math.pow(Number(document.getElementById('gamma').value),10)).toFixed(3);}document.getElementById('gamma').oninput=update;update(); document.getElementById('reveal').onclick=()=>document.getElementById('answer').hidden=false;let saved={};try{saved=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){} const notes=document.getElementById('notes');notes.value=saved.notes||'';document.querySelectorAll('.check').forEach((e,i)=>{e.checked=(saved.checks||[])[i]||false;e.onchange=save});function save(){try{localStorage.setItem(key,JSON.stringify({notes:notes.value,checks:[...document.querySelectorAll('.check')].map(e=>e.checked)}))}catch(e){}}notes.oninput=save;document.getElementById('export').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([notes.value],{type:'text/plain'}));a.download='session-11-notes.txt';a.click();URL.revokeObjectURL(a.href)};</script></body></html>
